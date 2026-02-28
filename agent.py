@@ -3,6 +3,9 @@ import asyncio
 import json
 from dotenv import load_dotenv
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from openai import AsyncOpenAI
 from vision_agents.core import agents
 from vision_agents.core.edge.types import User
@@ -13,12 +16,33 @@ from vision_agents.core.stt.events import STTTranscriptEvent
 
 from vision_agents.core.llm.events import LLMResponseCompletedEvent
 
+# from vision_agents.core.call.events import CallEndedEvent
+
 # transcript_buffer = []
+
+
+
 question_count = 0
 MAX_QUESTIONS = 5
 current_question = None
 current_answer_buffer = []
 conversation_segments = []
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/segments")
+async def get_segments():
+    return {
+        "segments": conversation_segments
+    }
 
 load_dotenv()
 
@@ -32,6 +56,7 @@ async def create_agent(role: str):
     insturctions= f"""
     You are a professional mock interviewer for a {role}.
     Ask clear concise interview questions.
+    Ask questions only, not delve into explaining them yourself by giving much examples and all.
     Keep responses short and natural.
     """
 
@@ -44,7 +69,7 @@ async def create_agent(role: str):
             model = "qwen/qwen3-235b-a22b-thinking-2507"
         ),
         stt=deepgram.STT(),
-        tts=cartesia.TTS(),
+        tts=deepgram.TTS(),
         turn_detection=smart_turn.TurnDetection(),
     )
 
@@ -164,7 +189,7 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str):
         conversation_segments.append(segment)
 
         print("Saved segment:", segment)
-
+        print("Entire conversation history:", conversation_segments)
         # Update state
         asyncio.create_task(
             evaluate_segment(current_question, full_answer)
@@ -180,6 +205,41 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str):
         current_question = event.text
         print("NEW QUESTION SET:", current_question)
 
+    # @agent.events.subscribe
+    # async def generate_final_report():
+    #     global conversation_segments
+
+    #     if not conversation_segments:
+    #         print("No segments to analyze.")
+    #         return
+
+    #     summary_prompt = f"""
+    #     You are generating a final interview performance report.
+
+    #     Interview Data:
+    #     {conversation_segments}
+
+    #     Provide:
+    #     1. Overall score (0-10)
+    #     2. Strengths
+    #     3. Weaknesses
+    #     4. Final improvement advice
+
+    #     Return structured JSON.
+    #     """
+
+    #     response = await eval_client.chat.completions.create(
+    #         model="qwen/qwen3-235b-a22b-thinking-2507",
+    #         messages=[{"role": "user", "content": summary_prompt}],
+    #         temperature=0.3,
+    #     )
+
+    #     raw = response.choices[0].message.content.strip()
+
+    #     print("\n====== FINAL REPORT ======")
+    #     print(raw)
+    #     print("==========================\n")
+
     async with agent.join(call):
         print("Agent joined call")
 
@@ -191,16 +251,30 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str):
 
         while True:
             await asyncio.sleep(1)
-    
-    
+   
         
-if __name__ ==  "__main__":
+# if __name__ ==  "__main__":
+#     role = "React Developer"
+#     call_type = "default"
+#     call_id = "test-call-123"
+
+#     async def main():
+#         agent = await create_agent(role)
+#         await join_call(agent, call_type, call_id)
+    
+#     asyncio.run(main())
+
+async def main_agent(role, call_type, call_id):
+    agent = await create_agent(role)
+    await join_call(agent, call_type, call_id)
+
+
+@app.on_event("startup")
+async def startup_event():
     role = "React Developer"
     call_type = "default"
     call_id = "test-call-123"
 
-    async def main():
-        agent = await create_agent(role)
-        await join_call(agent, call_type, call_id)
-    
-    asyncio.run(main())
+    asyncio.create_task(
+        main_agent(role, call_type, call_id)
+    )
