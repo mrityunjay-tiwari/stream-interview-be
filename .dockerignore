@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+.env
+.python-version
+*.pyc
+*.pyo
+*.pyd
+.db
+.cache
+README.md
+# Exclude the yolo model if it's too big, unless specifically needed in the container.
+# On Cloud Run CPU instances, it might not be efficient anyway.
+# But keep it if it's required by the agent.
+# yolo11n-pose.pt

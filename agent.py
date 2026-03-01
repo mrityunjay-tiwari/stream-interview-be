@@ -138,7 +138,8 @@ async def evaluate_segment(call_id: str, question: str, answer: str):
         # ✅ Store feedback in session
         sessions[call_id]["latest_feedback"] = feedback
 
-        print("Stored feedback for:", call_id)
+        print(f"\n[LOG] Feedback generated for call {call_id}:")
+        print(json.dumps(feedback, indent=2))
 
         return feedback
 
@@ -159,9 +160,17 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str):
         session["current_answer_buffer"].append(event.text)
 
     @agent.events.subscribe
+    async def on_turn_started(event: TurnStartedEvent):
+        if event.participant and event.participant.user_id == "agent":
+            return
+        print(f"\n[LOG] User started speaking in call: {call_id}")
+
+    @agent.events.subscribe
     async def on_turn_ended(event: TurnEndedEvent):
         if event.participant and event.participant.user_id == "agent":
             return
+        
+        print(f"\n[LOG] User finished speaking in call: {call_id}")
 
         if session["question_count"] >= 5:
             return
@@ -181,15 +190,20 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str):
 
         session["segments"].append(segment)
 
+        print(f"\n[LOG] Current segments for call {call_id}:")
+        print(json.dumps(session["segments"], indent=2))
+
         asyncio.create_task(
             evaluate_segment(call_id, question, full_answer)
         )
 
         session["question_count"] += 1
+        print(f"[LOG] Question count: {session['question_count']}/5")
 
     @agent.events.subscribe
     async def on_llm_response(event: LLMResponseCompletedEvent):
         session["current_question"] = event.text
+        print(f"\n[LOG] Agent response (new question) for call {call_id}: {event.text}")
 
     try:
         async with agent.join(call):
@@ -297,3 +311,13 @@ async def create_session():
     }
 
     return {"call_id": call_id}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+@app.get("/ready")
+async def ready():
+    # If there's any warmup logic, it should go here.
+    # For now, it's always ready if the server is up.
+    return {"status": "ready"}
