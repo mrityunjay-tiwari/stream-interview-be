@@ -8,5 +8,5 @@ dependencies = [
     "fastapi>=0.133.1",
     "python-dotenv>=1.2.1",
     "uvicorn>=0.41.0",
-    "vision-agents[cartesia,deepgram,gemini,getstream,openrouter,smart-turn]>=0.3.8",
+    "vision-agents[cartesia,deepgram,gemini,getstream,openrouter,smart-turn,ultralytics]>=0.3.8",
 ]
