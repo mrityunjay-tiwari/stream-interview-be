@@ -17,17 +17,7 @@ from vision_agents.core.stt.events import STTTranscriptEvent
 
 from vision_agents.core.llm.events import LLMResponseCompletedEvent
 
-# from vision_agents.core.call.events import CallEndedEvent
-
-# transcript_buffer = []
-
-
-
-# question_count = 0
 MAX_QUESTIONS = 5
-# current_question = None
-# current_answer_buffer = []
-# conversation_segments = []
 sessions = {}
 active_agents = {}
 
@@ -86,17 +76,6 @@ async def create_agent(role: str):
     
     return agent
 
-# async def join_call(agent: agents.Agent, call_type: str, call_id: str):
-#     await agent.create_user()
-#     call = await agent.create_call(call_type, call_id)
-
-#     async with agent.join(call):
-#         await agent.simple_response(
-#             "Hello and welcome to your mock interview. Please introduce yourself."
-#         )
-
-#         await agent.finish()
-
 async def evaluate_segment(call_id: str, question: str, answer: str):
     try:
         if call_id not in sessions:
@@ -152,8 +131,6 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str):
     call = await agent.create_call(call_type, call_id)
 
     session = sessions[call_id]
-
-    
 
     @agent.events.subscribe
     async def on_transcript(event: STTTranscriptEvent):
@@ -222,43 +199,9 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str):
         active_agents.pop(call_id, None)
         print("Agent cleanup complete:", call_id)  
         
-# if __name__ ==  "__main__":
-#     role = "React Developer"
-#     call_type = "default"
-#     call_id = "test-call-123"
-
-#     async def main():
-#         agent = await create_agent(role)
-#         await join_call(agent, call_type, call_id)
-    
-#     asyncio.run(main())
-
 async def main_agent(role, call_type, call_id):
     agent = await create_agent(role)
     await join_call(agent, call_type, call_id)
-
-
-# @app.on_event("startup")
-# async def startup_event():
-#     role = "React Developer"
-#     call_type = "default"
-#     call_id = "test-call-123"
-
-#     asyncio.create_task(
-#         main_agent(role, call_type, call_id)
-#     )
-
-# @app.post("/start-agent")
-# async def start_agent():
-#     role = "React Developer"
-#     call_type = "default"
-#     call_id = "test-call-123"
-
-#     asyncio.create_task(
-#         main_agent(role, call_type, call_id)
-#     )
-
-#     return {"status": "agent started"}
 
 @app.post("/start-agent")
 async def start_agent(data: dict):
@@ -318,6 +261,4 @@ async def health():
 
 @app.get("/ready")
 async def ready():
-    # If there's any warmup logic, it should go here.
-    # For now, it's always ready if the server is up.
     return {"status": "ready"}
