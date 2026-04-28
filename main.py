@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import asyncio
+from contextlib import suppress
 from fastapi import FastAPI, Request
 from getstream import Stream
 from openai import AsyncOpenAI
@@ -16,8 +17,9 @@ from vision_agents.plugins import getstream, deepgram, openrouter, smart_turn
 
 MIN_ANSWER_WORDS = 3
 TURN_DEBOUNCE_SECONDS = 1.0
-PRE_SPEAK_DELAY_SECONDS = 0.4
+PRE_SPEAK_DELAY_SECONDS = 0.25
 SECTION_WRAP_UP_BUFFER_SECONDS = 90
+MAX_SPOKEN_TEXT_LENGTH = 120
 
 SECTION_LABELS = {
     "projects": "Projects",
@@ -37,6 +39,19 @@ SECTION_PROMPT_HINTS = {
     "dsa": "Problem-solving, algorithmic reasoning, time and space complexity, tradeoffs, and correctness.",
     "system_design": "Architecture, scaling, system boundaries, data flow, reliability, tradeoffs, and evolution over time.",
     "ml_fundamentals": "Modeling intuition, training, evaluation, error analysis, deployment thinking, and practical ML tradeoffs.",
+}
+
+SENIORITY_HINTS = {
+    "Intern": "Keep questions foundational, guided, and narrower in scope. Expect simpler answers.",
+    "Junior Engineer": "Focus on fundamentals, small-scale implementation choices, and basic debugging.",
+    "SDE1": "Focus on practical implementation details, debugging, ownership of smaller features, and sound fundamentals.",
+    "SDE2": "Probe for stronger implementation depth, tradeoffs, and ownership of medium-complexity systems.",
+    "SDE3": "Expect deeper technical reasoning, broader ownership, and stronger clarity under probing.",
+    "Senior Engineer": "Probe architecture choices, tradeoffs, mentoring, debugging, scaling, and ownership depth.",
+    "Staff Engineer": "Probe cross-team thinking, platform design, strategic tradeoffs, and technical leadership.",
+    "Principal Engineer": "Probe long-horizon architecture, org-level impact, system evolution, and strategic engineering judgment.",
+    "Senior AI Engineer": "Probe model/system tradeoffs, production constraints, reliability, evaluation, and applied AI design.",
+    "Senior ML Engineer": "Probe modeling, training, evaluation, deployment, operational ML, and tradeoffs at production scale.",
 }
 
 sessions = {}
@@ -110,6 +125,23 @@ def is_repeat_request(answer: str) -> bool:
     ]
 
     return any(phrase in normalized for phrase in repeat_phrases)
+
+
+def normalize_spoken_text(text: str, fallback: str):
+    value = " ".join((text or "").strip().split())
+    fallback = " ".join((fallback or "").strip().split())
+
+    if not value:
+        value = fallback
+
+    if not value:
+        return ""
+
+    if len(value) <= MAX_SPOKEN_TEXT_LENGTH:
+        return value
+
+    clipped = value[:MAX_SPOKEN_TEXT_LENGTH].rsplit(" ", 1)[0].strip()
+    return clipped or fallback[:MAX_SPOKEN_TEXT_LENGTH].strip()
 
 
 def make_section(
@@ -264,6 +296,7 @@ def build_session_status(session: dict):
             "elapsedSeconds": 0,
             "durationSeconds": 0,
             "questionsCompleted": 0,
+            "currentQuestion": session.get("current_question"),
         }
 
     return {
@@ -275,6 +308,7 @@ def build_session_status(session: dict):
         "elapsedSeconds": get_current_section_elapsed_seconds(session),
         "durationSeconds": section["duration_minutes"] * 60,
         "questionsCompleted": section["questions_completed"],
+        "currentQuestion": session.get("current_question"),
     }
 
 
@@ -323,11 +357,14 @@ def should_transition_sections(session: dict, section: dict):
 async def parse_turn_response(response_content: str, fallback_question: str):
     try:
         data = extract_json(response_content)
-        spoken_text = (data.get("spoken_text") or "").strip()
-        question_text = (data.get("question_text") or "").strip()
-
-        if not spoken_text and not question_text:
-            raise ValueError("Empty turn response")
+        spoken_text = normalize_spoken_text(
+            data.get("spoken_text") or "",
+            data.get("question_text") or fallback_question,
+        )
+        question_text = normalize_spoken_text(
+            data.get("question_text") or "",
+            spoken_text or fallback_question,
+        )
 
         if not spoken_text:
             spoken_text = question_text
@@ -339,19 +376,24 @@ async def parse_turn_response(response_content: str, fallback_question: str):
             "question_text": question_text,
         }
     except Exception:
+        fallback = normalize_spoken_text(fallback_question, fallback_question)
         return {
-            "spoken_text": fallback_question,
-            "question_text": fallback_question,
+            "spoken_text": fallback,
+            "question_text": fallback,
         }
 
 
 async def generate_opening_turn(session: dict, section: dict):
+    seniority_hint = SENIORITY_HINTS.get(session["seniority"], "")
+
     prompt = f"""
 You are a professional mock interviewer.
 Role:
 {session['role']}
 Target seniority:
 {session['seniority']}
+Seniority guidance:
+{seniority_hint}
 Current section:
 {section['label']}
 Section guidance:
@@ -359,13 +401,12 @@ Section guidance:
 Ask the opening question for this section.
 Rules:
 - Ask exactly one question.
-- Keep it natural and interview-like.
+- Keep it concise and interview-like.
 - If this is the projects section, a short intro/background question is acceptable.
-- Do not ask multiple questions.
 - Return STRICT JSON only.
 {{
-  "spoken_text": "what the interviewer should say out loud",
-  "question_text": "the exact question being asked"
+  "spoken_text": "short spoken question",
+  "question_text": "the exact question"
 }}
 """
 
@@ -376,7 +417,7 @@ Rules:
             model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
-            max_tokens=180,
+            max_tokens=140,
         )
 
         content = response.choices[0].message.content
@@ -386,9 +427,10 @@ Rules:
         return await parse_turn_response(content, fallback_question)
     except Exception as error:
         print("Opening Turn Generation Error:", error)
+        fallback = normalize_spoken_text(fallback_question, fallback_question)
         return {
-            "spoken_text": fallback_question,
-            "question_text": fallback_question,
+            "spoken_text": fallback,
+            "question_text": fallback,
         }
 
 
@@ -400,9 +442,10 @@ async def generate_next_turn(
 ):
     full_transcript = build_transcript(session["segments"])
     section_transcript = build_section_transcript(session["segments"], section["type"])
+    seniority_hint = SENIORITY_HINTS.get(session["seniority"], "")
 
     wrap_up_instruction = (
-        "You are close to the section boundary. Ask one concise final question in this section."
+        "You are near the section boundary. Ask one short final question in this section."
         if section["state"] == "WRAP_UP"
         else "Continue the section naturally."
     )
@@ -413,6 +456,8 @@ Role:
 {session['role']}
 Target seniority:
 {session['seniority']}
+Seniority guidance:
+{seniority_hint}
 Current section:
 {section['label']}
 Section guidance:
@@ -429,13 +474,13 @@ Instructions:
 - Use the candidate's most recent answer to decide the next question.
 - If the answer is shallow, probe deeper on the same topic.
 - If the answer is sufficient, move forward within the same section.
-- Do not ask multiple questions in one turn.
-- Keep it natural and interview-like.
+- Ask exactly one concise question.
+- Do not ask multiple questions.
 - {wrap_up_instruction}
 - Return STRICT JSON only.
 {{
-  "spoken_text": "what the interviewer should say out loud",
-  "question_text": "the exact question being asked"
+  "spoken_text": "short spoken question",
+  "question_text": "the exact question"
 }}
 """
 
@@ -446,7 +491,7 @@ Instructions:
             model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
-            max_tokens=180,
+            max_tokens=140,
         )
 
         content = response.choices[0].message.content
@@ -456,9 +501,10 @@ Instructions:
         return await parse_turn_response(content, fallback_question)
     except Exception as error:
         print("Next Turn Generation Error:", error)
+        fallback = normalize_spoken_text(fallback_question, fallback_question)
         return {
-            "spoken_text": fallback_question,
-            "question_text": fallback_question,
+            "spoken_text": fallback,
+            "question_text": fallback,
         }
 
 
@@ -467,7 +513,7 @@ async def generate_transition_turn(
     previous_section: dict,
     next_section: dict,
 ):
-    full_transcript = build_transcript(session["segments"])
+    seniority_hint = SENIORITY_HINTS.get(session["seniority"], "")
 
     prompt = f"""
 You are a professional mock interviewer.
@@ -475,47 +521,50 @@ Role:
 {session['role']}
 Target seniority:
 {session['seniority']}
+Seniority guidance:
+{seniority_hint}
 Completed section:
 {previous_section['label']}
 Next section:
 {next_section['label']}
 Next section guidance:
 {SECTION_PROMPT_HINTS[next_section['type']]}
-Interview transcript so far:
-{full_transcript}
 Generate the transition into the next section.
 Rules:
-- Start with one short transition sentence.
-- Then ask exactly one opening question for the next section.
-- Keep it natural and interview-like.
-- Do not ask multiple questions beyond the single opening question.
+- Use one short transition sentence.
+- Then ask one short opening question.
+- Keep the full spoken output concise.
 - Return STRICT JSON only.
 {{
-  "spoken_text": "full spoken transition plus question",
-  "question_text": "only the actual new question being asked"
+  "spoken_text": "short transition plus short question",
+  "question_text": "only the new question"
 }}
 """
 
-    fallback_question = f"Let's move to the {next_section['label']} round. What would you say is the most important concept in this area for your level?"
+    fallback_spoken = f"Let's move to the {next_section['label']} round. What is the most important concept in this area for your level?"
+    fallback_question = "What is the most important concept in this area for your level?"
 
     try:
         response = await llm_client.chat.completions.create(
             model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
-            max_tokens=180,
+            max_tokens=140,
         )
 
         content = response.choices[0].message.content
         if not content:
             raise ValueError("Empty transition turn response")
 
-        return await parse_turn_response(content, fallback_question)
+        parsed = await parse_turn_response(content, fallback_question)
+        parsed["spoken_text"] = normalize_spoken_text(parsed["spoken_text"], fallback_spoken)
+        parsed["question_text"] = normalize_spoken_text(parsed["question_text"], fallback_question)
+        return parsed
     except Exception as error:
         print("Transition Turn Generation Error:", error)
         return {
-            "spoken_text": fallback_question,
-            "question_text": fallback_question.split(". ", 1)[-1].strip(),
+            "spoken_text": normalize_spoken_text(fallback_spoken, fallback_spoken),
+            "question_text": normalize_spoken_text(fallback_question, fallback_question),
         }
 
 
@@ -523,10 +572,9 @@ async def create_agent(role: str):
     instructions = f"""
     You are a professional mock interviewer for a {role}.
     Ask exactly one interview question at a time.
-    Keep questions clear and natural.
-    Do not ask multiple questions in one turn.
+    Keep questions clear, concise, and natural.
     If the candidate asks for a repeat, repeat only the same question.
-    Do not give long explanations unless explicitly asked.
+    Do not ask multiple questions in one turn.
     """
 
     agent = agents.Agent(
@@ -618,20 +666,94 @@ Return STRICT JSON only:
         return None
 
 
-async def safe_say(agent: agents.Agent, session: dict, call_id: str, agent_instance_id: str, text: str):
-    await asyncio.sleep(PRE_SPEAK_DELAY_SECONDS)
+async def cancel_active_speech(session: dict):
+    task = session.get("active_speech_task")
 
-    if session.get("interview_ended"):
-        return
+    if task and not task.done():
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
-    if session.get("user_speaking"):
-        print(f"[AGENT {agent_instance_id}] skipping speech because user started speaking again in call {call_id}")
-        return
+    session["active_speech_task"] = None
+    session["agent_speaking"] = False
 
-    if not text or not text.strip():
-        return
 
-    await agent.say(text.strip())
+async def _perform_speech(
+    agent: agents.Agent,
+    session: dict,
+    call_id: str,
+    agent_instance_id: str,
+    text: str,
+    generation: int,
+):
+    try:
+        await asyncio.sleep(PRE_SPEAK_DELAY_SECONDS)
+
+        if session.get("interview_ended"):
+            return
+
+        if session.get("user_speaking"):
+            print(f"[AGENT {agent_instance_id}] skipping speech because user started speaking again in call {call_id}")
+            return
+
+        if generation != session.get("speech_generation"):
+            print(f"[AGENT {agent_instance_id}] skipping stale speech in call {call_id}")
+            return
+
+        normalized_text = normalize_spoken_text(text, text)
+        if not normalized_text:
+            return
+
+        async with session["speech_lock"]:
+            if session.get("interview_ended"):
+                return
+
+            if session.get("user_speaking"):
+                print(f"[AGENT {agent_instance_id}] user resumed speaking before TTS in call {call_id}")
+                return
+
+            if generation != session.get("speech_generation"):
+                print(f"[AGENT {agent_instance_id}] stale speech rejected before TTS in call {call_id}")
+                return
+
+            session["agent_speaking"] = True
+            session["last_agent_speech_started_at"] = now_ts()
+
+            try:
+                await agent.say(normalized_text)
+            finally:
+                session["agent_speaking"] = False
+                session["last_agent_speech_finished_at"] = now_ts()
+
+    except asyncio.CancelledError:
+        session["agent_speaking"] = False
+        print(f"[AGENT {agent_instance_id}] speech task cancelled in call {call_id}")
+        raise
+    except Exception as error:
+        session["agent_speaking"] = False
+        print(f"[AGENT {agent_instance_id}] agent.say failed in call {call_id}: {error}")
+    finally:
+        if session.get("active_speech_task") is asyncio.current_task():
+            session["active_speech_task"] = None
+
+
+async def queue_speech(
+    agent: agents.Agent,
+    session: dict,
+    call_id: str,
+    agent_instance_id: str,
+    text: str,
+):
+    session["speech_generation"] += 1
+    generation = session["speech_generation"]
+
+    await cancel_active_speech(session)
+
+    task = asyncio.create_task(
+        _perform_speech(agent, session, call_id, agent_instance_id, text, generation)
+    )
+    session["active_speech_task"] = task
+    await task
 
 
 async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_instance_id: str):
@@ -666,6 +788,9 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
 
         session["last_turn_started_at"] = current_time
         session["user_speaking"] = True
+        session["speech_generation"] += 1
+        await cancel_active_speech(session)
+
         print(f"[AGENT {agent_instance_id}] user started speaking in call {call_id}")
 
     @agent.events.subscribe
@@ -715,7 +840,7 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
                 print(f"[AGENT {agent_instance_id}] user asked to repeat the question in call {call_id}")
                 session["current_answer_buffer"] = []
                 session["last_processed_answer"] = None
-                await safe_say(agent, session, call_id, agent_instance_id, current_question)
+                await queue_speech(agent, session, call_id, agent_instance_id, current_question)
                 return
 
             if len(full_answer.split()) < MIN_ANSWER_WORDS:
@@ -757,7 +882,7 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
 
                 if next_section is None:
                     session["interview_ended"] = True
-                    await safe_say(
+                    await queue_speech(
                         agent,
                         session,
                         call_id,
@@ -786,7 +911,7 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
                 f"[AGENT {agent_instance_id}] next question for call {call_id}: "
                 f"{turn['question_text']}"
             )
-            await safe_say(agent, session, call_id, agent_instance_id, turn["spoken_text"])
+            await queue_speech(agent, session, call_id, agent_instance_id, turn["spoken_text"])
 
         except Exception as error:
             print(f"[AGENT {agent_instance_id}] turn processing error for call {call_id}: {error}")
@@ -804,7 +929,7 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
             session["current_question"] = opening_turn["question_text"]
 
             print(f"[AGENT {agent_instance_id}] about to say intro question")
-            await safe_say(
+            await queue_speech(
                 agent,
                 session,
                 call_id,
@@ -818,10 +943,14 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
 
     finally:
         if call_id in sessions:
+            sessions[call_id]["speech_generation"] += 1
+            await cancel_active_speech(session)
+
             sessions[call_id]["agent_joined"] = False
             sessions[call_id]["processing_turn"] = False
             sessions[call_id]["interview_ended"] = True
             sessions[call_id]["user_speaking"] = False
+            sessions[call_id]["agent_speaking"] = False
 
         active_agents.pop(call_id, None)
         print(f"[AGENT {agent_instance_id}] final cleanup complete for call {call_id}")
@@ -860,6 +989,7 @@ async def get_session_status(call_id: str):
             "elapsedSeconds": 0,
             "durationSeconds": 0,
             "questionsCompleted": 0,
+            "currentQuestion": None,
         }
 
     return build_session_status(session)
@@ -913,6 +1043,12 @@ async def create_session(request: Request):
         "last_turn_started_at": 0.0,
         "last_turn_ended_at": 0.0,
         "user_speaking": False,
+        "agent_speaking": False,
+        "speech_generation": 0,
+        "active_speech_task": None,
+        "speech_lock": asyncio.Lock(),
+        "last_agent_speech_started_at": 0.0,
+        "last_agent_speech_finished_at": 0.0,
     }
 
     return {
@@ -942,6 +1078,8 @@ async def end_call(data: dict):
     if call_id in sessions:
         sessions[call_id]["status"] = "ended"
         sessions[call_id]["interview_ended"] = True
+        sessions[call_id]["speech_generation"] += 1
+        await cancel_active_speech(sessions[call_id])
         return {"message": "Call ended successfully"}
 
     return {"error": "Session not found"}
@@ -978,6 +1116,12 @@ async def start_agent(data: dict):
     session["last_turn_started_at"] = 0.0
     session["last_turn_ended_at"] = 0.0
     session["user_speaking"] = False
+    session["agent_speaking"] = False
+    session["speech_generation"] = 0
+    session["active_speech_task"] = None
+    session["speech_lock"] = asyncio.Lock()
+    session["last_agent_speech_started_at"] = 0.0
+    session["last_agent_speech_finished_at"] = 0.0
 
     async def runner():
         try:
@@ -990,6 +1134,7 @@ async def start_agent(data: dict):
                 sessions[call_id]["agent_joined"] = False
                 sessions[call_id]["processing_turn"] = False
                 sessions[call_id]["user_speaking"] = False
+                sessions[call_id]["agent_speaking"] = False
             print(f"[AGENT {agent_instance_id}] cleanup complete for call {call_id}")
 
     task = asyncio.create_task(runner())
