@@ -9,3 +9,8 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+another.py
+another2.py
+
+tree.json
