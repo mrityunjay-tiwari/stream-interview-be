@@ -32,26 +32,76 @@ SECTION_LABELS = {
 }
 
 SECTION_PROMPT_HINTS = {
-    "projects": "Project walkthroughs, implementation ownership, execution decisions, and practical tradeoffs.",
-    "frontend": "React, browser behavior, UI architecture, rendering, state, performance, accessibility, and debugging.",
-    "backend": "APIs, databases, services, reliability, debugging, distributed systems basics, and tradeoffs.",
-    "behavioral": "Communication, conflict resolution, ownership, leadership, teamwork, ambiguity, and decision-making.",
-    "dsa": "Problem-solving, algorithmic reasoning, time and space complexity, tradeoffs, and correctness.",
-    "system_design": "Architecture, scaling, system boundaries, data flow, reliability, tradeoffs, and evolution over time.",
-    "ml_fundamentals": "Modeling intuition, training, evaluation, error analysis, deployment thinking, and practical ML tradeoffs.",
+    "projects": "Project walkthroughs, implementation ownership, execution decisions, practical tradeoffs, delivery choices, and technical ownership.",
+    "frontend": "React, browser behavior, UI architecture, rendering, state, performance, accessibility, testing, and debugging.",
+    "backend": "APIs, databases, service design, reliability, observability, debugging, distributed systems basics, and engineering tradeoffs.",
+    "behavioral": "Communication, conflict resolution, ownership, leadership, teamwork, ambiguity, prioritization, and decision-making.",
+    "dsa": "Problem-solving, algorithmic reasoning, time and space complexity, edge cases, correctness, and tradeoff thinking.",
+    "system_design": "Architecture, scaling, system boundaries, data flow, reliability, fault tolerance, tradeoffs, and evolution over time.",
+    "ml_fundamentals": "Modeling intuition, training, evaluation, error analysis, deployment thinking, production ML tradeoffs, and practical ML reasoning.",
 }
 
-SENIORITY_HINTS = {
-    "Intern": "Keep questions foundational, guided, and narrower in scope. Expect simpler answers.",
-    "Junior Engineer": "Focus on fundamentals, small-scale implementation choices, and basic debugging.",
-    "SDE1": "Focus on practical implementation details, debugging, ownership of smaller features, and sound fundamentals.",
-    "SDE2": "Probe for stronger implementation depth, tradeoffs, and ownership of medium-complexity systems.",
-    "SDE3": "Expect deeper technical reasoning, broader ownership, and stronger clarity under probing.",
-    "Senior Engineer": "Probe architecture choices, tradeoffs, mentoring, debugging, scaling, and ownership depth.",
-    "Staff Engineer": "Probe cross-team thinking, platform design, strategic tradeoffs, and technical leadership.",
-    "Principal Engineer": "Probe long-horizon architecture, org-level impact, system evolution, and strategic engineering judgment.",
-    "Senior AI Engineer": "Probe model/system tradeoffs, production constraints, reliability, evaluation, and applied AI design.",
-    "Senior ML Engineer": "Probe modeling, training, evaluation, deployment, operational ML, and tradeoffs at production scale.",
+SENIORITY_PROFILES = {
+    "Intern": {
+        "scope": "Keep questions foundational and narrow. Prefer concrete basics, simple implementation reasoning, and project exposure over open-ended architecture.",
+        "expected_depth": "A correct answer can be brief if it is relevant, clear, and technically sound.",
+        "followup_style": "Use lighter follow-ups. Clarify gaps rather than aggressively probing.",
+        "evaluation_bar": "Score based on correctness of fundamentals, clarity, and evidence of learning potential.",
+    },
+    "Junior Engineer": {
+        "scope": "Focus on fundamentals, small feature ownership, debugging, and practical implementation choices.",
+        "expected_depth": "Expect working knowledge of day-to-day engineering tasks with modest depth.",
+        "followup_style": "Use targeted follow-ups to test understanding of implementation and reasoning.",
+        "evaluation_bar": "Score based on practical understanding, relevance, and ability to explain straightforward technical choices.",
+    },
+    "SDE1": {
+        "scope": "Focus on practical implementation details, debugging, smaller feature ownership, and solid fundamentals.",
+        "expected_depth": "Expect clear understanding of common engineering concepts and direct implementation tradeoffs.",
+        "followup_style": "Probe one level deeper when answers are vague or surface-level.",
+        "evaluation_bar": "Score based on clarity, correctness, implementation depth, and real-world grounding.",
+    },
+    "SDE2": {
+        "scope": "Probe implementation depth, tradeoffs, stronger ownership, reliability, and medium-complexity problem solving.",
+        "expected_depth": "Expect stronger reasoning, tradeoffs, and better articulation under follow-up.",
+        "followup_style": "Use sharper follow-ups to test decision-making and judgment.",
+        "evaluation_bar": "Score based on technical depth, tradeoff awareness, and quality of reasoning under pressure.",
+    },
+    "SDE3": {
+        "scope": "Expect broader ownership, stronger debugging instincts, system-level awareness, and consistent depth.",
+        "expected_depth": "Answers should show independent judgment, prioritization, and stronger tradeoff awareness.",
+        "followup_style": "Probe for consequences, alternatives, and decision rationale.",
+        "evaluation_bar": "Score based on strong technical articulation, depth, and ownership thinking.",
+    },
+    "Senior Engineer": {
+        "scope": "Probe architecture choices, scaling, reliability, mentoring, cross-cutting concerns, and technical leadership in execution.",
+        "expected_depth": "Expect nuanced tradeoffs, debugging maturity, and clarity about system impact.",
+        "followup_style": "Use direct follow-ups that test architecture judgment and leadership depth.",
+        "evaluation_bar": "Score based on depth, clarity, scale-awareness, and engineering judgment.",
+    },
+    "Staff Engineer": {
+        "scope": "Probe cross-team design thinking, platform choices, strategic tradeoffs, influence, and engineering direction.",
+        "expected_depth": "Expect organization-aware technical reasoning and strong architectural clarity.",
+        "followup_style": "Probe for long-term implications, boundaries, and alignment decisions.",
+        "evaluation_bar": "Score based on strategic technical judgment, platform thinking, and ability to reason across systems.",
+    },
+    "Principal Engineer": {
+        "scope": "Probe org-level technical impact, long-horizon architecture, platform strategy, and system evolution.",
+        "expected_depth": "Expect exceptional clarity, deep tradeoff thinking, and strong architectural leadership.",
+        "followup_style": "Probe consequences, risk management, and system evolution over time.",
+        "evaluation_bar": "Score based on architectural depth, strategic influence, and mature long-term engineering judgment.",
+    },
+    "Senior AI Engineer": {
+        "scope": "Probe applied AI system design, evaluation, reliability, inference tradeoffs, and production AI decision-making.",
+        "expected_depth": "Expect strong ML/AI system reasoning plus software engineering rigor.",
+        "followup_style": "Probe production constraints, reliability, evaluation quality, and system tradeoffs.",
+        "evaluation_bar": "Score based on practical AI engineering depth, evaluation rigor, and production judgment.",
+    },
+    "Senior ML Engineer": {
+        "scope": "Probe modeling, training, evaluation, deployment, monitoring, and ML tradeoffs in production environments.",
+        "expected_depth": "Expect strong technical depth across model and systems sides of ML work.",
+        "followup_style": "Probe assumptions, evaluation quality, and production consequences.",
+        "evaluation_bar": "Score based on ML depth, practical deployment understanding, and tradeoff quality.",
+    },
 }
 
 sessions = {}
@@ -107,6 +157,10 @@ def safe_int(value, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def get_seniority_profile(seniority: str):
+    return SENIORITY_PROFILES.get(seniority, SENIORITY_PROFILES["SDE1"])
 
 
 def is_repeat_request(answer: str) -> bool:
@@ -326,6 +380,23 @@ def build_section_transcript(segments: list[dict], section_type: str):
     return build_transcript(filtered)
 
 
+def get_focus_topics_text(section: dict):
+    topics = section.get("focus_topics") or []
+    if not topics:
+        return "No explicit focus topics provided."
+    return ", ".join(topics)
+
+
+def get_answer_signal(answer: str):
+    word_count = len(answer.split())
+
+    if word_count < 12:
+        return "brief"
+    if word_count < 35:
+        return "moderate"
+    return "detailed"
+
+
 def should_transition_sections(session: dict, section: dict):
     elapsed_seconds = get_current_section_elapsed_seconds(session)
     duration_seconds = section["duration_minutes"] * 60
@@ -384,7 +455,7 @@ async def parse_turn_response(response_content: str, fallback_question: str):
 
 
 async def generate_opening_turn(session: dict, section: dict):
-    seniority_hint = SENIORITY_HINTS.get(session["seniority"], "")
+    profile = get_seniority_profile(session["seniority"])
 
     prompt = f"""
 You are a professional mock interviewer.
@@ -392,16 +463,21 @@ Role:
 {session['role']}
 Target seniority:
 {session['seniority']}
-Seniority guidance:
-{seniority_hint}
+Seniority scope:
+{profile['scope']}
+Expected depth:
+{profile['expected_depth']}
 Current section:
 {section['label']}
 Section guidance:
 {SECTION_PROMPT_HINTS[section['type']]}
+Focus topics:
+{get_focus_topics_text(section)}
 Ask the opening question for this section.
 Rules:
 - Ask exactly one question.
 - Keep it concise and interview-like.
+- Match the difficulty to the target seniority.
 - If this is the projects section, a short intro/background question is acceptable.
 - Return STRICT JSON only.
 {{
@@ -417,7 +493,7 @@ Rules:
             model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
-            max_tokens=140,
+            max_tokens=160,
         )
 
         content = response.choices[0].message.content
@@ -442,7 +518,8 @@ async def generate_next_turn(
 ):
     full_transcript = build_transcript(session["segments"])
     section_transcript = build_section_transcript(session["segments"], section["type"])
-    seniority_hint = SENIORITY_HINTS.get(session["seniority"], "")
+    profile = get_seniority_profile(session["seniority"])
+    answer_signal = get_answer_signal(answer)
 
     wrap_up_instruction = (
         "You are near the section boundary. Ask one short final question in this section."
@@ -456,12 +533,18 @@ Role:
 {session['role']}
 Target seniority:
 {session['seniority']}
-Seniority guidance:
-{seniority_hint}
+Seniority scope:
+{profile['scope']}
+Expected depth:
+{profile['expected_depth']}
+Follow-up style:
+{profile['followup_style']}
 Current section:
 {section['label']}
 Section guidance:
 {SECTION_PROMPT_HINTS[section['type']]}
+Focus topics:
+{get_focus_topics_text(section)}
 All interview transcript so far:
 {full_transcript}
 Current section transcript:
@@ -470,10 +553,13 @@ Most recent question:
 {current_question}
 Most recent answer:
 {answer}
+Answer signal:
+{answer_signal}
 Instructions:
 - Use the candidate's most recent answer to decide the next question.
 - If the answer is shallow, probe deeper on the same topic.
 - If the answer is sufficient, move forward within the same section.
+- Match the difficulty to the target seniority.
 - Ask exactly one concise question.
 - Do not ask multiple questions.
 - {wrap_up_instruction}
@@ -491,7 +577,7 @@ Instructions:
             model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
-            max_tokens=140,
+            max_tokens=160,
         )
 
         content = response.choices[0].message.content
@@ -513,7 +599,7 @@ async def generate_transition_turn(
     previous_section: dict,
     next_section: dict,
 ):
-    seniority_hint = SENIORITY_HINTS.get(session["seniority"], "")
+    profile = get_seniority_profile(session["seniority"])
 
     prompt = f"""
 You are a professional mock interviewer.
@@ -521,18 +607,23 @@ Role:
 {session['role']}
 Target seniority:
 {session['seniority']}
-Seniority guidance:
-{seniority_hint}
+Seniority scope:
+{profile['scope']}
+Expected depth:
+{profile['expected_depth']}
 Completed section:
 {previous_section['label']}
 Next section:
 {next_section['label']}
 Next section guidance:
 {SECTION_PROMPT_HINTS[next_section['type']]}
+Focus topics:
+{get_focus_topics_text(next_section)}
 Generate the transition into the next section.
 Rules:
 - Use one short transition sentence.
 - Then ask one short opening question.
+- Match the difficulty to the target seniority.
 - Keep the full spoken output concise.
 - Return STRICT JSON only.
 {{
@@ -549,7 +640,7 @@ Rules:
             model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
-            max_tokens=140,
+            max_tokens=160,
         )
 
         content = response.choices[0].message.content
@@ -605,6 +696,8 @@ async def evaluate_segment(
         if call_id not in sessions:
             return None
 
+        profile = get_seniority_profile(seniority)
+
         prompt = f"""
 You are evaluating a mock interview answer.
 Target role:
@@ -613,6 +706,12 @@ Target seniority:
 {seniority}
 Section:
 {SECTION_LABELS.get(section_type, section_type)}
+Section guidance:
+{SECTION_PROMPT_HINTS.get(section_type, section_type)}
+Evaluation bar:
+{profile['evaluation_bar']}
+Expected depth:
+{profile['expected_depth']}
 Question:
 {question}
 Answer:
@@ -753,7 +852,11 @@ async def queue_speech(
         _perform_speech(agent, session, call_id, agent_instance_id, text, generation)
     )
     session["active_speech_task"] = task
-    await task
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_instance_id: str):
@@ -994,7 +1097,25 @@ async def get_session_status(call_id: str):
 
     return build_session_status(session)
 
+@app.get("/report-context/{call_id}")
+async def get_report_context(call_id: str):
+    session = sessions.get(call_id)
 
+    if not session:
+        return {
+            "role": None,
+            "seniority": None,
+            "flow": [],
+            "feedbackHistory": [],
+        }
+
+    return {
+        "role": session.get("role"),
+        "seniority": session.get("seniority"),
+        "flow": session.get("flow", []),
+        "feedbackHistory": session.get("feedback_history", []),
+    }
+    
 @app.post("/create-token")
 async def create_token(user_id: str):
     token = stream_client.create_token(user_id)
