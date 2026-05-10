@@ -285,6 +285,26 @@ def normalize_flow(raw_flow, role: str):
     return normalized
 
 
+def build_intro_prompt(role: str, seniority: str):
+    normalized_role = (role or "software engineer").strip()
+    normalized_seniority = (seniority or "SDE1").strip()
+
+    spoken_text = (
+        f"Hi, welcome. I'll be conducting your mock interview for a "
+        f"{normalized_seniority} {normalized_role} role. "
+        "Before we begin, could you briefly introduce yourself and walk me through your background and recent work?"
+    )
+
+    question_text = (
+        "Could you briefly introduce yourself and walk me through your background and recent work?"
+    )
+
+    return {
+        "spoken_text": normalize_spoken_text(spoken_text, spoken_text),
+        "question_text": normalize_spoken_text(question_text, question_text),
+    }
+
+
 def get_current_section(session: dict):
     flow = session.get("flow", [])
     index = session.get("current_section_index", 0)
@@ -486,7 +506,7 @@ Rules:
 }}
 """
 
-    fallback_question = "Please introduce yourself and tell me about a recent project relevant to this role."
+    fallback_question = "Please tell me about a recent project relevant to this role."
 
     try:
         response = await llm_client.chat.completions.create(
@@ -672,9 +692,7 @@ async def create_agent(role: str):
         edge=getstream.Edge(),
         agent_user=User(name="Interview Coach", id="agent"),
         instructions=instructions,
-        llm=openrouter.LLM(
-            model="openai/gpt-4o-mini"
-        ),
+        llm=openrouter.LLM(model="openai/gpt-4o-mini"),
         stt=deepgram.STT(),
         tts=deepgram.TTS(),
         turn_detection=smart_turn.TurnDetection(),
@@ -870,7 +888,6 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
         return
 
     session["agent_joined"] = True
-    first_section = start_section(session, 0)
 
     @agent.events.subscribe
     async def on_transcript(event: STTTranscriptEvent):
@@ -921,11 +938,6 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
         session["processing_turn"] = True
 
         try:
-            current_section = get_current_section(session)
-            if not current_section:
-                session["interview_ended"] = True
-                return
-
             print(f"[AGENT {agent_instance_id}] user finished speaking in call {call_id}")
 
             full_answer = " ".join(session["current_answer_buffer"]).strip()
@@ -955,6 +967,54 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
                 return
 
             session["last_processed_answer"] = full_answer
+
+            if not session.get("intro_completed"):
+                intro_question = session.get("current_question") or "Please introduce yourself."
+
+                session["segments"].append(
+                    {
+                        "question": intro_question,
+                        "answer": full_answer,
+                        "section_type": "introduction",
+                    }
+                )
+
+                session["intro_completed"] = True
+                session["current_answer_buffer"] = []
+                session["last_processed_answer"] = None
+
+                first_section = start_section(session, 0)
+                if not first_section:
+                    session["interview_ended"] = True
+                    await queue_speech(
+                        agent,
+                        session,
+                        call_id,
+                        agent_instance_id,
+                        "That concludes the interview. Thank you for taking part.",
+                    )
+                    return
+
+                opening_turn = await generate_opening_turn(session, first_section)
+                session["current_question"] = opening_turn["question_text"]
+
+                print(
+                    f"[AGENT {agent_instance_id}] first section question for call {call_id}: "
+                    f"{opening_turn['question_text']}"
+                )
+                await queue_speech(
+                    agent,
+                    session,
+                    call_id,
+                    agent_instance_id,
+                    opening_turn["spoken_text"],
+                )
+                return
+
+            current_section = get_current_section(session)
+            if not current_section:
+                session["interview_ended"] = True
+                return
 
             segment = {
                 "question": current_question,
@@ -1028,18 +1088,18 @@ async def join_call(agent: agents.Agent, call_type: str, call_id: str, agent_ins
             session["current_answer_buffer"] = []
             session["last_processed_answer"] = None
 
-            opening_turn = await generate_opening_turn(session, first_section)
-            session["current_question"] = opening_turn["question_text"]
+            intro_turn = build_intro_prompt(session["role"], session["seniority"])
+            session["current_question"] = intro_turn["question_text"]
 
-            print(f"[AGENT {agent_instance_id}] about to say intro question")
+            print(f"[AGENT {agent_instance_id}] about to say intro prompt")
             await queue_speech(
                 agent,
                 session,
                 call_id,
                 agent_instance_id,
-                opening_turn["spoken_text"],
+                intro_turn["spoken_text"],
             )
-            print(f"[AGENT {agent_instance_id}] intro question said")
+            print(f"[AGENT {agent_instance_id}] intro prompt said")
 
             while not session.get("interview_ended"):
                 await asyncio.sleep(1)
@@ -1097,6 +1157,7 @@ async def get_session_status(call_id: str):
 
     return build_session_status(session)
 
+
 @app.get("/report-context/{call_id}")
 async def get_report_context(call_id: str):
     session = sessions.get(call_id)
@@ -1115,7 +1176,8 @@ async def get_report_context(call_id: str):
         "flow": session.get("flow", []),
         "feedbackHistory": session.get("feedback_history", []),
     }
-    
+
+
 @app.post("/create-token")
 async def create_token(user_id: str):
     token = stream_client.create_token(user_id)
@@ -1170,6 +1232,7 @@ async def create_session(request: Request):
         "speech_lock": asyncio.Lock(),
         "last_agent_speech_started_at": 0.0,
         "last_agent_speech_finished_at": 0.0,
+        "intro_completed": False,
     }
 
     return {
@@ -1233,6 +1296,7 @@ async def start_agent(data: dict):
     session["interview_ended"] = False
     session["agent_instance_id"] = agent_instance_id
     session["current_answer_buffer"] = []
+    session["current_question"] = None
     session["last_processed_answer"] = None
     session["last_turn_started_at"] = 0.0
     session["last_turn_ended_at"] = 0.0
@@ -1243,6 +1307,7 @@ async def start_agent(data: dict):
     session["speech_lock"] = asyncio.Lock()
     session["last_agent_speech_started_at"] = 0.0
     session["last_agent_speech_finished_at"] = 0.0
+    session["intro_completed"] = False
 
     async def runner():
         try:

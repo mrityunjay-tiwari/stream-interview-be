@@ -2,14 +2,12 @@
 
 This is the backend for the **Stream Interview** platform—a professional AI-powered mock interview tool. It leverages cutting-edge AI agents to conduct real-time interviews, provide instant technical and behavioral feedback, and facilitate high-quality video/audio communication.
 
----
 
 ### Linked Repositories
 
 - **Frontend Repository:** [https://github.com/mrityunjay-tiwari/interview-tool](https://github.com/mrityunjay-tiwari/interview-tool)
 - **Hosted on HuggingFace Spaces:** [https://huggingface.co/spaces/mrityunjay18/ai_interview_agent](https://huggingface.co/spaces/mrityunjay18/ai_interview_agent)
 
----
 
 ## Features
 
@@ -20,7 +18,6 @@ This is the backend for the **Stream Interview** platform—a professional AI-po
 - **Session Management:** Organizes interview segments (question/answer pairs) for post-interview review.
 - **Docker Support:** Fully containerized for easy and consistent deployment.
 
----
 
 ## Tech Stack
 
@@ -32,7 +29,6 @@ This is the backend for the **Stream Interview** platform—a professional AI-po
 - **Dependency Management:** [uv](https://github.com/astral-sh/uv)
 - **Containerization:** Docker
 
----
 
 ## Project Structure
 
@@ -45,7 +41,6 @@ This is the backend for the **Stream Interview** platform—a professional AI-po
 └── .env             # Environment variables (required)
 ```
 
----
 
 ## Getting Started
 
@@ -88,7 +83,6 @@ uvicorn agent:app --reload --port 8000
 uvicorn server:app --reload --port 8001
 ```
 
----
 
 ## API Reference
 
@@ -101,9 +95,8 @@ uvicorn server:app --reload --port 8001
 | `/create-token`              | `POST` | Generates a Stream token for a specific user ID.                                  |
 | `/health`                    | `GET`  | Health check endpoint.                                                            |
 
----
 
-## 🐳 Running with Docker
+## Running with Docker
 
 1. **Build the image:**
 
@@ -116,5 +109,4 @@ uvicorn server:app --reload --port 8001
    docker run -p 8000:8000 --env-file .env stream-be
    ```
 
----
 
