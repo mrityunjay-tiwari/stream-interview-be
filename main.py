@@ -1,3 +1,6 @@
+# Very Important Note : This file may seem very lage to you, but every route and every function has been independently written in a very clean order, I'm currently just lazy to refactor it and the Docker file, hence it's so! Soon getting the motivation to do it.
+# This is the backend being used in production for the AI Interview Voice Agent, it is the major orchestration layer. It uses vision-agents library to create agents, deepgram (collecting money to switch to Cartesia) for STT and TTS and OpenRouter for LLM.
+
 import os
 import json
 import uuid
